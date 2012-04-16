@@ -8,56 +8,57 @@
 import vtk
 from argparse import ArgumentParser
 
-parser = ArgumentParser(description="Convert legacy VTK files to .png")
-parser.add_argument('infile', nargs='+',
-        action='store',
-        default=None,
-        help='name of input file in .vtk format',
-        metavar='file.vtk')
-parser.add_argument('--outfile', '-o', nargs=1,
-        action='store',
-        default=None,
-        help='name of output file in .png format',
-        metavar='file.png')
-parser.add_argument('--size', '-s',
-        action='store',
-        type=int,
-        default=800,
-        help='picture tile size (N x N) '
-        '[default: %(default)s x %(default)s]',
-        metavar='N')
-parser.add_argument('--separation', '-S',
-        action='store',
-        type=int,
-        default=45,
-        help='separation of actors in combi-view mode'
-        '[default: %(default)s]', metavar='N')
-parser.add_argument('--color-scheme', '-c',
-        action='store',
-        choices=('default', 'bw', 'wb'),
-        default='default',
-        help='color scheme')
-parser.add_argument('--fiber', '-f',
-        action='store_true',
-        default=False,
-        help='render using 3D fibers')
-parser.add_argument('--rotations', '-r',
-        action='store_true',
-        default=False,
-        help='Use different rotations for each tile')
-parser.add_argument('--offscreen', '-x',
-        action='store_true',
-        default=False,
-        help='Use offscreen rendering if available')
-parser.add_argument('--multiview', '-m',
-        action='store_true',
-        default=False,
-        help='Render each file in a separate viewport')
+def parse_commandline():
+    parser = ArgumentParser(description="Convert legacy VTK files to .png")
+    parser.add_argument('infile', nargs='+',
+            action='store',
+            default=None,
+            help='name of input file in .vtk format',
+            metavar='file.vtk')
+    parser.add_argument('--outfile', '-o', nargs=1,
+            action='store',
+            default=None,
+            help='name of output file in .png format',
+            metavar='file.png')
+    parser.add_argument('--size', '-s',
+            action='store',
+            type=int,
+            default=800,
+            help='picture tile size (N x N) '
+            '[default: %(default)s x %(default)s]',
+            metavar='N')
+    parser.add_argument('--separation', '-S',
+            action='store',
+            type=int,
+            default=45,
+            help='separation of actors in combi-view mode'
+            '[default: %(default)s]', metavar='N')
+    parser.add_argument('--color-scheme', '-c',
+            action='store',
+            choices=('default', 'bw', 'wb'),
+            default='default',
+            help='color scheme')
+    parser.add_argument('--fiber', '-f',
+            action='store_true',
+            default=False,
+            help='render using 3D fibers')
+    parser.add_argument('--rotations', '-r',
+            action='store_true',
+            default=False,
+            help='Use different rotations for each tile')
+    parser.add_argument('--offscreen', '-x',
+            action='store_true',
+            default=False,
+            help='Use offscreen rendering if available')
+    parser.add_argument('--multiview', '-m',
+            action='store_true',
+            default=False,
+            help='Render each file in a separate viewport')
 
-args = parser.parse_args()
-
+    return parser.parse_args()
 
 def main():
+    args = parse_commandline()
     renderers = []
     rotor = 0
     if not args.multiview:
@@ -67,9 +68,11 @@ def main():
         if len(args.infile) > 1:
             args.rotations = True
         viewports = get_viewports(1)
-        renderers.append(create_renderer(viewports[0]))
+        renderers.append(create_renderer(viewports[0], 
+            color_scheme=args.color_scheme))
         for i in args.infile:
-            actor = create_actor(i)
+            actor = create_actor(i, color_scheme=args.color_scheme, 
+                    fiber=args.fiber)
             transform_combiview(actor, rotor, args.separation)
             renderers[0].AddActor(actor)
             if args.rotations:
@@ -79,16 +82,18 @@ def main():
     else:
         viewports = get_viewports(len(args.infile))
         for i, v in zip(args.infile, viewports):
-            actor = create_actor(i)
+            actor = create_actor(i, color_scheme=args.color_scheme, 
+                    fiber=args.fiber)
             transform_multiview(actor, rotor)
             if args.rotations:
                 rotor += 1
-            renderers.append(create_renderer(v, actor))
+            renderers.append(create_renderer(args, v, actor,
+                color_scheme=args.color_scheme))
 
     camera = renderers[0].GetActiveCamera()
     for i in renderers[1:]:
         i.SetActiveCamera(camera)
-    window = create_scene(renderers)
+    window = create_scene(renderers, args.size)
     if args.outfile:
         save_screenshot(args.outfile[0], window, args.offscreen)
     else:
@@ -114,7 +119,7 @@ def get_viewports(n):
     return viewports
 
 
-def create_actor(fname=None):
+def create_actor(fname=None, color_scheme=None, fiber=False):
     if fname:
         reader = vtk.vtkPolyDataReader()
         reader.SetFileName(fname)
@@ -123,7 +128,7 @@ def create_actor(fname=None):
     else:
         prop = vtk.vtkCubeSource()  # for testing
 
-    if args.fiber:
+    if fiber:
         tube = vtk.vtkTubeFilter()
         tube.SetInputConnection(reader.GetOutputPort())
         prop = tube
@@ -148,7 +153,7 @@ def create_actor(fname=None):
 # Set actor properties
     props = actor.GetProperty()
     props.SetAmbientColor(0.6, 0.6, 0.6)
-    if args.color_scheme == 'wb' and not args.fiber:
+    if color_scheme == 'wb' and not fiber:
         props.SetDiffuseColor(0.1, 0.1, 0.1)
     else:
         props.SetDiffuseColor(0.9, 0.9, 0.9)
@@ -181,12 +186,12 @@ def transform_combiview(actor, rotation=0, transl=45):
         raise RuntimeError('Invalid transformation spec. This is a bug')
     actor.AddPosition(transl, 0.0, 0.0)
 
-def create_renderer(viewport=None, actor=None):
+def create_renderer(viewport=None, actor=None, color_scheme=None):
 # Create the Renderer
     renderer = vtk.vtkRenderer()
-    if args.color_scheme == 'bw':
+    if color_scheme == 'bw':
         renderer.SetBackground(0.0, 0.0, 0.0)
-    elif args.color_scheme == 'wb':
+    elif color_scheme == 'wb':
         renderer.SetBackground(1.0, 1.0, 1.0)
     else:
         renderer.SetBackground(0.1, 0.2, 0.31)
@@ -213,13 +218,13 @@ def create_renderer(viewport=None, actor=None):
     return renderer
 
 
-def create_scene(renderers):
+def create_scene(renderers, size=500):
     n = len(renderers)
     if n < 4:
-        sx = args.size * n
-        sy = args.size
+        sx = size * n
+        sy = size
     elif n == 4:
-        sx = sy = args.size * 2
+        sx = sy = size * 2
     else:
         raise ValueError("Too many input files!")
 
