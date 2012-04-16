@@ -2,14 +2,13 @@
 # -*- coding: utf-8 -*-
 #
 # Program to visualize dust bunnies.
-# Jonas Juselius <jonas.juselius@uit.no> 2012
+# Jonas Juselius <jonas.juselius@uit.no> 04/2012
 #
 
-import sys
-import vtk 
+import vtk
 from argparse import ArgumentParser
 
-parser = ArgumentParser(description = "Convert legacy VTK files to .png")
+parser = ArgumentParser(description="Convert legacy VTK files to .png")
 parser.add_argument('infile', nargs='+',
         action='store',
         default=None,
@@ -24,10 +23,16 @@ parser.add_argument('--size', '-s',
         action='store',
         type=int,
         default=800,
-        help='picture tile size (N x N) ' 
+        help='picture tile size (N x N) '
         '[default: %(default)s x %(default)s]',
         metavar='N')
-parser.add_argument('--color-scheme', '-c', 
+parser.add_argument('--separation', '-S',
+        action='store',
+        type=int,
+        default=45,
+        help='separation of actors in combi-view mode'
+        '[default: %(default)s]', metavar='N')
+parser.add_argument('--color-scheme', '-c',
         action='store',
         choices=('default', 'bw', 'wb'),
         default='default',
@@ -40,27 +45,55 @@ parser.add_argument('--rotations', '-r',
         action='store_true',
         default=False,
         help='Use different rotations for each tile')
+parser.add_argument('--offscreen', '-x',
+        action='store_true',
+        default=False,
+        help='Use offscreen rendering if available')
+parser.add_argument('--multiview', '-m',
+        action='store_true',
+        default=False,
+        help='Render each file in a separate viewport')
 
 args = parser.parse_args()
 
+
 def main():
     renderers = []
-    viewports = get_viewports(len(args.infile))
     rotor = 0
-    for i, v in zip(args.infile, viewports):
-        actor = create_actor(i, rotor)
-        if args.rotations:
-            rotor += 1
-        renderers.append(create_renderer(actor, v))
-#    camera = renderers[0].GetActiveCamera()
-#    for i in renderers[1:]:
-#        i.SetActiveCamera(camera)
+    if not args.multiview:
+        if len(args.infile) > 2:
+            raise RuntimeError(
+                    'Combi-view not supported for more than 2 files')
+        if len(args.infile) > 1:
+            args.rotations = True
+        viewports = get_viewports(1)
+        renderers.append(create_renderer(viewports[0]))
+        for i in args.infile:
+            actor = create_actor(i)
+            transform_combiview(actor, rotor, args.separation)
+            renderers[0].AddActor(actor)
+            if args.rotations:
+                rotor += 1
+            renderers[0].ResetCamera()
+        renderers[0].ResetCamera()
+    else:
+        viewports = get_viewports(len(args.infile))
+        for i, v in zip(args.infile, viewports):
+            actor = create_actor(i)
+            transform_multiview(actor, rotor)
+            if args.rotations:
+                rotor += 1
+            renderers.append(create_renderer(v, actor))
 
+    camera = renderers[0].GetActiveCamera()
+    for i in renderers[1:]:
+        i.SetActiveCamera(camera)
     window = create_scene(renderers)
     if args.outfile:
-        save_screenshot(args.outfile[0], window)
+        save_screenshot(args.outfile[0], window, args.offscreen)
     else:
         view_scene(window)
+
 
 def get_viewports(n):
     viewports = []
@@ -80,46 +113,38 @@ def get_viewports(n):
         viewports.append((0.5, 0.0, 1.0, 0.5))
     return viewports
 
-def create_actor(fname = None, rotation = 0):
+
+def create_actor(fname=None):
     if fname:
         reader = vtk.vtkPolyDataReader()
         reader.SetFileName(fname)
-        reader.Update() 
+        reader.Update()
         prop = reader
     else:
-        prop = vtk.vtkCubeSource() # for testing
+        prop = vtk.vtkCubeSource()  # for testing
 
     if args.fiber:
         tube = vtk.vtkTubeFilter()
         tube.SetInputConnection(reader.GetOutputPort())
         prop = tube
 
-    transform = vtk.vtkTransform()
-    transform.Translate(0.0, 0.0, 0.0)
-    if rotation == 1:
-        transform.RotateX(-90.0)
-        transform.RotateZ(-90.0)
-    elif rotation == 2:
-        transform.RotateX(-90.0)
-        transform.RotateZ(0.0)
-    elif rotation == 3:
-        transform.RotateZ(-90.0)
-    else: 
-        transform.RotateX(-90.0)
-        transform.RotateZ(90.0)
-
 # Create the mapper that corresponds the objects of the vtk file
 # into graphics elements
     mapper = vtk.vtkDataSetMapper()
     mapper.SetInputConnection(prop.GetOutputPort())
 #    mapper.SetScalarMaterialModeToAmbientAndDiffuse()
-    
+
 # Create the Actor
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
-    actor.SetOrigin(0.0, 0.0, 0.0)
-    actor.SetUserTransform(transform)
 
+    bbox = actor.GetBounds()
+    o = []
+    for i in range(3):
+        m = i * 2
+        n = m + 1
+        o.append((bbox[n] + bbox[m]) / 2.0)
+    actor.SetOrigin(o)
 # Set actor properties
     props = actor.GetProperty()
     props.SetAmbientColor(0.6, 0.6, 0.6)
@@ -133,19 +158,40 @@ def create_actor(fname = None, rotation = 0):
 #    props.SetRepresentationToWireframe()
     return actor
 
-def create_renderer(actor, viewport = None):
+def transform_multiview(actor, rotation=0):
+    if rotation == 0:
+        actor.RotateY(-90.0)
+    elif rotation == 1:
+        actor.RotateY(90.0)
+    elif rotation == 2:
+        actor.RotateX(-90.0)
+        actor.RotateZ(0.0)
+    elif rotation == 3:
+        actor.RotateZ(-90.0)
+    else:
+        raise RuntimeError('Invalid transformation spec. This is a bug')
+
+def transform_combiview(actor, rotation=0, transl=45):
+    if rotation == 0:
+        actor.RotateY(-90.0)
+        transl = -transl
+    elif rotation == 1:
+        actor.RotateY(90.0)
+    else:
+        raise RuntimeError('Invalid transformation spec. This is a bug')
+    actor.AddPosition(transl, 0.0, 0.0)
+
+def create_renderer(viewport=None, actor=None):
 # Create the Renderer
     renderer = vtk.vtkRenderer()
-    renderer.AddActor(actor)
     if args.color_scheme == 'bw':
-        renderer.SetBackground(0.0, 0.0, 0.0) 
+        renderer.SetBackground(0.0, 0.0, 0.0)
     elif args.color_scheme == 'wb':
         renderer.SetBackground(1.0, 1.0, 1.0)
     else:
-        renderer.SetBackground(0.1, 0.2, 0.31) 
+        renderer.SetBackground(0.1, 0.2, 0.31)
     if viewport:
-        renderer.SetViewport(viewport) 
-    camera = renderer.GetActiveCamera()
+        renderer.SetViewport(viewport)
 
     light_kit = vtk.vtkLightKit()
     light_kit.AddLightsToRenderer(renderer)
@@ -154,22 +200,28 @@ def create_renderer(actor, viewport = None):
     light_kit.SetKeyLightWarmth(0.5)
     light_kit.SetKeyLightAzimuth(0.0)
 
-    camera.ParallelProjectionOn()
-    camera.SetFocalPoint(0.0, 0.0, 0.0)
-    camera.SetViewAngle(45)
+#    camera = renderer.GetActiveCamera()
+#    camera.SetViewUp(0.0, 0.0, 1.0)
+#    camera.SetPosition(0.0, 0.0, 50.0)
+#    camera.ParallelProjectionOn()
+#    camera.SetFocalPoint(0.0, 0.0, 0.0)
+#    camera.SetViewAngle(45)
 
+    if actor:
+        renderer.AddActor(actor)
     renderer.ResetCamera()
     return renderer
 
+
 def create_scene(renderers):
-    n = len(args.infile) 
+    n = len(renderers)
     if n < 4:
         sx = args.size * n
         sy = args.size
     elif n == 4:
         sx = sy = args.size * 2
     else:
-        raise ValueError, "Too many input files!"
+        raise ValueError("Too many input files!")
 
 # Create the RendererWindow
     window = vtk.vtkRenderWindow()
@@ -177,6 +229,7 @@ def create_scene(renderers):
     for i in renderers:
         window.AddRenderer(i)
     return window
+
 
 def view_scene(window):
 # Create an interactor and display the vtk_file
@@ -187,8 +240,10 @@ def view_scene(window):
     interactor.Initialize()
     interactor.Start()
 
-def save_screenshot(fname, window):
-    set_off_screen_rendering(window)
+
+def save_screenshot(fname, window, offscreen=False):
+    if offscreen:
+        set_off_screen_rendering(window)
     window.Render()
     w2if = vtk.vtkWindowToImageFilter()
     w2if.SetInput(window)
@@ -198,6 +253,7 @@ def save_screenshot(fname, window):
     writer.SetFileName(fname)
     writer.SetInput(w2if.GetOutput())
     writer.Write()
+
 
 def dump_screen(obj, event):
     window = obj.GetRenderWindow()
@@ -210,7 +266,8 @@ def dump_screen(obj, event):
     writer.SetInput(w2if.GetOutput())
     writer.Write()
 
-def set_off_screen_rendering(window):   
+
+def set_off_screen_rendering(window):
     'Turn on off-screen rendering, if available'
     gfx_factory = vtk.vtkGraphicsFactory()
     gfx_factory.SetOffScreenOnlyMode(1)
@@ -221,6 +278,8 @@ def set_off_screen_rendering(window):
 
     window.SetOffScreenRendering(1)
 
+
 if __name__ == '__main__':
     main()
+
 # vim:et:sw=4
