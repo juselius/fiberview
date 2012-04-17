@@ -27,12 +27,11 @@ def parse_commandline():
             help='picture tile size (N x N) '
             '[default: %(default)s x %(default)s]',
             metavar='N')
-    parser.add_argument('--separation', '-S',
+    parser.add_argument('--camera', '-C',
             action='store',
-            type=int,
-            default=45,
-            help='separation of actors in combi-view mode'
-            '[default: %(default)s]', metavar='N')
+            type=str,
+            default=None,
+            help='camera transformation (e.g. xxy)')
     parser.add_argument('--color-scheme', '-c',
             action='store',
             choices=('default', 'bw', 'wb'),
@@ -73,12 +72,10 @@ def main():
         for i in args.infile:
             actor = create_actor(i, color_scheme=args.color_scheme, 
                     fiber=args.fiber)
-            transform_combiview(actor, rotor, args.separation)
             renderers[0].AddActor(actor)
-            if args.rotations:
-                rotor += 1
-            renderers[0].ResetCamera()
         renderers[0].ResetCamera()
+        camera = renderers[0].GetActiveCamera()
+        transform_camera(camera, args.camera)
     else:
         viewports = get_viewports(len(args.infile))
         for i, v in zip(args.infile, viewports):
@@ -132,6 +129,10 @@ def create_actor(fname=None, color_scheme=None, fiber=False):
         tube = vtk.vtkTubeFilter()
         tube.SetInputConnection(reader.GetOutputPort())
         prop = tube
+    
+#    outline = vtk.vtkOutlineFilter()
+#    outline.SetInputConnection(prop.GetOutputPort())
+#    prop = outline
 
 # Create the mapper that corresponds the objects of the vtk file
 # into graphics elements
@@ -176,15 +177,23 @@ def transform_multiview(actor, rotation=0):
     else:
         raise RuntimeError('Invalid transformation spec. This is a bug')
 
-def transform_combiview(actor, rotation=0, transl=45):
-    if rotation == 0:
-        actor.RotateY(-90.0)
-        transl = -transl
-    elif rotation == 1:
-        actor.RotateY(90.0)
-    else:
-        raise RuntimeError('Invalid transformation spec. This is a bug')
-    actor.AddPosition(transl, 0.0, 0.0)
+def transform_camera(camera, transform=None):
+    if not transform:
+        return
+    if not isinstance(transform, str):
+        raise TypeError('Transform must be a string. This is a bug.')
+
+    transform = transform.lower()
+    for i in transform:
+        print i
+        if i == 'x':
+            camera.Elevation(90.0)
+        elif i == 'y':
+            camera.Roll(90.0)
+        elif i == 'z':
+            camera.Azimuth(90.0)
+        else:
+            raise RuntimeError('Invalid transformation spec. This is a bug')
 
 def create_renderer(viewport=None, actor=None, color_scheme=None):
 # Create the Renderer
