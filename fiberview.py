@@ -27,11 +27,16 @@ def parse_commandline():
             help='picture tile size (N x N) '
             '[default: %(default)s x %(default)s]',
             metavar='N')
+    parser.add_argument('--angle', '-a',
+            action='store',
+            type=float,
+            default=90.0,
+            help='camera transformation angle [default: %(default)s]')
     parser.add_argument('--camera', '-C',
             action='store',
             type=str,
             default=None,
-            help='camera transformation (e.g. xxy)')
+            help='camera azimuth, elevation, roll (e.g. aer)')
     parser.add_argument('--color-scheme', '-c',
             action='store',
             choices=('default', 'bw', 'wb'),
@@ -75,7 +80,7 @@ def main():
             renderers[0].AddActor(actor)
         renderers[0].ResetCamera()
         camera = renderers[0].GetActiveCamera()
-        transform_camera(camera, args.camera)
+        transform_camera(camera, args.camera, args.angle)
     else:
         viewports = get_viewports(len(args.infile))
         for i, v in zip(args.infile, viewports):
@@ -177,7 +182,7 @@ def transform_multiview(actor, rotation=0):
     else:
         raise RuntimeError('Invalid transformation spec. This is a bug')
 
-def transform_camera(camera, transform=None):
+def transform_camera(camera, transform=None, angle=90.0):
     if not transform:
         return
     if not isinstance(transform, str):
@@ -186,12 +191,12 @@ def transform_camera(camera, transform=None):
     transform = transform.lower()
     for i in transform:
         print i
-        if i == 'x':
-            camera.Elevation(90.0)
-        elif i == 'y':
-            camera.Roll(90.0)
-        elif i == 'z':
-            camera.Azimuth(90.0)
+        if i == 'e':
+            camera.Elevation(angle)
+        elif i == 'r':
+            camera.Roll(angle)
+        elif i == 'a':
+            camera.Azimuth(angle)
         else:
             raise RuntimeError('Invalid transformation spec. This is a bug')
 
