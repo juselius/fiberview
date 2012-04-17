@@ -50,6 +50,10 @@ def parse_commandline():
             action='store_true',
             default=False,
             help='Use different rotations for each tile')
+    parser.add_argument('--box', '-b',
+            action='store_true',
+            default=False,
+            help='Draw the bounding box around each object')
     parser.add_argument('--offscreen', '-x',
             action='store_true',
             default=False,
@@ -75,22 +79,29 @@ def main():
         renderers.append(create_renderer(viewports[0], 
             color_scheme=args.color_scheme))
         for i in args.infile:
-            actor = create_actor(i, color_scheme=args.color_scheme, 
+            (actor, source) = create_actor(i, color_scheme=args.color_scheme, 
                     fiber=args.fiber)
             renderers[0].AddActor(actor)
+            if args.box:
+                bbox = create_box(source)
+                renderers[0].AddActor(bbox)
         renderers[0].ResetCamera()
         camera = renderers[0].GetActiveCamera()
         transform_camera(camera, args.camera, args.angle)
     else:
         viewports = get_viewports(len(args.infile))
         for i, v in zip(args.infile, viewports):
-            actor = create_actor(i, color_scheme=args.color_scheme, 
+            (actor, source) = create_actor(i, color_scheme=args.color_scheme, 
                     fiber=args.fiber)
             transform_multiview(actor, rotor)
             if args.rotations:
                 rotor += 1
-            renderers.append(create_renderer(args, v, actor,
+            renderers.append(create_renderer(v, actor,
                 color_scheme=args.color_scheme))
+            if args.box:
+                bbox = create_box(source)
+                transform_multiview(bbox, rotor)
+                renderers[-1].AddActor(bbox)
 
     camera = renderers[0].GetActiveCamera()
     for i in renderers[1:]:
@@ -134,10 +145,6 @@ def create_actor(fname=None, color_scheme=None, fiber=False):
         tube = vtk.vtkTubeFilter()
         tube.SetInputConnection(reader.GetOutputPort())
         prop = tube
-    
-#    outline = vtk.vtkOutlineFilter()
-#    outline.SetInputConnection(prop.GetOutputPort())
-#    prop = outline
 
 # Create the mapper that corresponds the objects of the vtk file
 # into graphics elements
@@ -149,13 +156,6 @@ def create_actor(fname=None, color_scheme=None, fiber=False):
     actor = vtk.vtkActor()
     actor.SetMapper(mapper)
 
-    bbox = actor.GetBounds()
-    o = []
-    for i in range(3):
-        m = i * 2
-        n = m + 1
-        o.append((bbox[n] + bbox[m]) / 2.0)
-    actor.SetOrigin(o)
 # Set actor properties
     props = actor.GetProperty()
     props.SetAmbientColor(0.6, 0.6, 0.6)
@@ -167,6 +167,15 @@ def create_actor(fname=None, color_scheme=None, fiber=False):
 #    props.SetLineWidth(1)
 #    props.SetRepresentationToSurface()
 #    props.SetRepresentationToWireframe()
+    return (actor, reader)
+
+def create_box(source):
+    outline = vtk.vtkOutlineFilter()
+    outline.SetInputConnection(source.GetOutputPort())
+    mapper = vtk.vtkDataSetMapper()
+    mapper.SetInputConnection(outline.GetOutputPort())
+    actor = vtk.vtkActor()
+    actor.SetMapper(mapper)
     return actor
 
 def transform_multiview(actor, rotation=0):
@@ -190,7 +199,6 @@ def transform_camera(camera, transform=None, angle=90.0):
 
     transform = transform.lower()
     for i in transform:
-        print i
         if i == 'e':
             camera.Elevation(angle)
         elif i == 'r':
