@@ -4,6 +4,9 @@
 # jonas juselius <jonas.juselius@uit.no>
 #
 
+# adding some doc bla oof
+
+
 import sys
 #sys.path.append('/usr/lib/paraview')
 
@@ -22,13 +25,6 @@ parser.add_argument('outfile', nargs='?',
         default=None,
         help='name of output file in .png format',
         metavar='output.png')
-parser.add_argument('--size',
-        action='store',
-        type=int,
-        default=808,
-        help='size of generated picture N x N' 
-        '[default: %(default) x %(default)',
-        metavar='N')
 parser.add_argument('--colors',
         action='store',
         choices=('default', 'bw', 'wb'),
